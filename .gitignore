@@ -1,0 +1,35 @@
+# 生成ファイル
+output/
+*.mp4
+*.mp3
+
+# 認証情報
+token.json
+client_secrets.json
+*.json
+!package.json
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+.eggs/
+.venv/
+venv/
+env/
+
+# BGM（著作権フリー素材は各自追加）
+bgm/**/*.mp3
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
