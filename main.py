@@ -14,6 +14,7 @@ from generate_script import generate_script
 from generate_audio import generate_audio_segments
 from fetch_images import fetch_images
 from create_video import create_video
+from upload_youtube import upload_youtube
 from notify_slack import notify_slack
 
 logging.basicConfig(
@@ -71,12 +72,31 @@ def run():
     )
     logger.info(f"動画生成完了: {video_path}")
 
-    # ⑤ Slack通知
+    # ⑤ YouTube アップロード
+    youtube_url = None
+    if os.environ.get("YOUTUBE_CREDENTIALS"):
+        logger.info("【Step 5/5】YouTube Shorts アップロード中...")
+        try:
+            video_id = upload_youtube(
+                video_path=str(video_path),
+                title=script["title"],
+                description=script["description"],
+                tags=script["tags"],
+            )
+            youtube_url = f"https://www.youtube.com/shorts/{video_id}"
+            logger.info(f"YouTube アップロード完了: {youtube_url}")
+        except Exception as e:
+            logger.error(f"YouTube アップロード失敗（パイプラインは継続）: {e}")
+    else:
+        logger.info("YOUTUBE_CREDENTIALS 未設定のためYouTubeアップロードをスキップ")
+
+    # ⑥ Slack通知
     logger.info("Slack通知送信中...")
     notify_slack(
         theme=script["theme"],
         title=script["title"],
         video_path=str(video_path),
+        youtube_url=youtube_url,
     )
 
     logger.info("=== Mystery Shorts Pipeline 完了 ===")
