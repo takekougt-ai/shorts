@@ -12,6 +12,13 @@ from typing import List
 
 logger = logging.getLogger(__name__)
 
+# ImageMagick のパスを明示的に設定（GitHub Actions 環境対応）
+try:
+    from moviepy.config import change_settings
+    change_settings({"IMAGEMAGICK_BINARY": "/usr/bin/convert"})
+except Exception:
+    pass
+
 VIDEO_WIDTH = 1080
 VIDEO_HEIGHT = 1920
 VIDEO_FPS = 30
