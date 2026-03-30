@@ -3,6 +3,7 @@ Mystery Shorts Pipeline — create_video.py
 MoviePy で縦型ショート動画を合成
 """
 
+import glob
 import logging
 import os
 import random
@@ -11,13 +12,6 @@ from pathlib import Path
 from typing import List
 
 logger = logging.getLogger(__name__)
-
-# ImageMagick のパスを明示的に設定（GitHub Actions 環境対応）
-try:
-    from moviepy.config import change_settings
-    change_settings({"IMAGEMAGICK_BINARY": "/usr/bin/convert"})
-except Exception:
-    pass
 
 VIDEO_WIDTH = 1080
 VIDEO_HEIGHT = 1920
@@ -125,27 +119,68 @@ def _make_image_clip(img_path: str, duration: float):
 
 
 def _make_text_clip(text: str, duration: float):
-    """字幕テキストクリップを生成して返す"""
-    from moviepy.editor import TextClip
+    """PIL で字幕テキストクリップを生成して返す（ImageMagick不要）"""
+    from moviepy.editor import ImageClip
+    from PIL import Image, ImageDraw, ImageFont
+    import numpy as np
 
-    # 22文字で折り返し
-    wrapped = "\n".join(textwrap.wrap(text, width=TEXT_WRAP_WIDTH))
+    lines = textwrap.wrap(text, width=TEXT_WRAP_WIDTH)
+    font_path = _find_font()
+    try:
+        font = ImageFont.truetype(font_path, FONT_SIZE) if font_path else ImageFont.load_default()
+    except Exception:
+        font = ImageFont.load_default()
 
-    txt_clip = TextClip(
-        wrapped,
-        fontsize=FONT_SIZE,
-        font=FONT_NAME,
-        color=TEXT_COLOR,
-        stroke_color=TEXT_STROKE_COLOR,
-        stroke_width=TEXT_STROKE_WIDTH,
-        method="caption",
-        size=(VIDEO_WIDTH - 80, None),
-        align="center",
-    )
+    # 各行のサイズを計測
+    dummy = ImageDraw.Draw(Image.new("RGBA", (1, 1)))
+    line_bboxes = [dummy.textbbox((0, 0), line, font=font) for line in lines]
+    line_widths = [b[2] - b[0] for b in line_bboxes]
+    line_heights = [b[3] - b[1] for b in line_bboxes]
 
+    line_spacing = 12
+    stroke_w = int(TEXT_STROKE_WIDTH)
+    pad = stroke_w + 4
+    canvas_w = max(line_widths) + pad * 2 if line_widths else VIDEO_WIDTH - 80
+    canvas_h = sum(line_heights) + line_spacing * (len(lines) - 1) + pad * 2
+
+    img = Image.new("RGBA", (canvas_w, canvas_h), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(img)
+
+    y = pad
+    for line, lw, lh in zip(lines, line_widths, line_heights):
+        x = (canvas_w - lw) // 2
+        # 縁取り
+        for dx in range(-stroke_w, stroke_w + 1):
+            for dy in range(-stroke_w, stroke_w + 1):
+                if dx != 0 or dy != 0:
+                    draw.text((x + dx, y + dy), line, font=font, fill=(0, 0, 0, 255))
+        # 本文
+        draw.text((x, y), line, font=font, fill=(255, 255, 255, 255))
+        y += lh + line_spacing
+
+    frame = np.array(img)
+    txt_clip = ImageClip(frame, ismask=False)
     y_pos = int(VIDEO_HEIGHT * TEXT_POSITION_Y_RATIO)
-    txt_clip = txt_clip.set_position(("center", y_pos)).set_duration(duration)
-    return txt_clip
+    return txt_clip.set_position(("center", y_pos)).set_duration(duration)
+
+
+def _find_font() -> str | None:
+    """システムの Noto CJK フォントパスを返す"""
+    candidates = [
+        "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+        "/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc",
+        "/usr/share/fonts/opentype/noto/NotoSansCJKjp-Regular.otf",
+        "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
+    ]
+    for path in candidates:
+        if Path(path).exists():
+            return path
+    for pattern in ["/usr/share/fonts/**/NotoSansCJK*.ttc", "/usr/share/fonts/**/NotoSansCJK*.otf"]:
+        found = glob.glob(pattern, recursive=True)
+        if found:
+            return found[0]
+    logger.warning("Noto CJK フォントが見つかりません。デフォルトフォントを使用")
+    return None
 
 
 def _select_bgm(mood: str) -> str | None:
