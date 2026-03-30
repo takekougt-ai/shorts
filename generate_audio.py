@@ -17,7 +17,8 @@ ELEVENLABS_API_URL = "https://api.elevenlabs.io/v1/text-to-speech/{voice_id}"
 ELEVENLABS_TIMESTAMPS_URL = (
     "https://api.elevenlabs.io/v1/text-to-speech/{voice_id}/with-timestamps"
 )
-DEFAULT_VOICE_ID = "pNInz6obpgDQGcFmaJgB"  # Adam
+ELEVENLABS_VOICES_URL = "https://api.elevenlabs.io/v1/voices"
+DEFAULT_VOICE_ID = "pNInz6obpgDQGcFmaJgB"  # Adam（ライブラリボイス・有料プランのみ）
 TTS_MODEL = "eleven_multilingual_v2"
 AUDIO_OUTPUT_DIR = Path("output/audio")
 
@@ -45,7 +46,7 @@ def generate_audio_segments(narration_segments: List[dict]) -> List[dict]:
         audio_path = AUDIO_OUTPUT_DIR / f"segment_{i:02d}.mp3"
 
         logger.info(f"  音声生成 [{i+1}/{len(narration_segments)}]: {text[:30]}...")
-        _generate_single_audio(api_key, voice_id, text, str(audio_path))
+        voice_id = _generate_single_audio_with_fallback(api_key, voice_id, text, str(audio_path))
 
         duration = _get_audio_duration(str(audio_path))
         results.append(
@@ -99,6 +100,54 @@ def generate_audio_with_timestamps(
         )
 
     return results
+
+
+def _get_usable_voice_id(api_key: str) -> str:
+    """アカウントで使用可能なボイスIDを取得して返す"""
+    req = urllib.request.Request(
+        ELEVENLABS_VOICES_URL,
+        headers={"xi-api-key": api_key},
+        method="GET",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+    except Exception as e:
+        raise RuntimeError(f"ElevenLabs ボイス一覧取得失敗: {e}") from e
+
+    voices = data.get("voices", [])
+    # cloned / generated / professional は自分のボイスで使用可能
+    for category in ("cloned", "generated", "professional"):
+        for v in voices:
+            if v.get("category") == category:
+                logger.info(f"  フォールバックボイス使用: {v['name']} ({v['voice_id']})")
+                return v["voice_id"]
+
+    # premade ボイスを最後の手段として試す
+    for v in voices:
+        if v.get("category") == "premade":
+            logger.info(f"  premadeボイスで試行: {v['name']} ({v['voice_id']})")
+            return v["voice_id"]
+
+    raise RuntimeError(
+        "使用可能なボイスが見つかりません。ElevenLabs で Voice Design からボイスを作成してください。"
+    )
+
+
+def _generate_single_audio_with_fallback(
+    api_key: str, voice_id: str, text: str, output_path: str
+) -> str:
+    """402エラー時にアカウントのボイスへ自動フォールバックしてTTSを実行。使用したvoice_idを返す"""
+    try:
+        _generate_single_audio(api_key, voice_id, text, output_path)
+        return voice_id
+    except RuntimeError as e:
+        if "402" not in str(e) and "payment" not in str(e).lower():
+            raise
+        logger.warning(f"  ボイス '{voice_id}' が使用不可。アカウントのボイスを検索中...")
+        fallback_id = _get_usable_voice_id(api_key)
+        _generate_single_audio(api_key, fallback_id, text, output_path)
+        return fallback_id
 
 
 def _generate_single_audio(
