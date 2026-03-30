@@ -134,6 +134,12 @@ def _generate_single_audio(
             audio_data = resp.read()
     except urllib.error.HTTPError as e:
         error_body = e.read().decode("utf-8")
+        if e.code == 402:
+            raise RuntimeError(
+                "ElevenLabs 402エラー: このボイスは無料プランでは使用できません。"
+                "ElevenLabs の My Voices からボイスIDを取得して "
+                "ELEVENLABS_VOICE_ID シークレットを更新してください。"
+            ) from e
         raise RuntimeError(
             f"ElevenLabs API エラー {e.code}: {error_body}"
         ) from e
